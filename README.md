@@ -216,10 +216,11 @@ actually attest.
 
 ## Version compatibility
 
-The protocol requires `sscsb verify --format json`, which landed **after**
-sscsb v0.2.1. The action probes the installed binary and fails with a clear
-message if it is too old; until a newer release is published, use
-`sscsb-version: "build"`.
+The protocol requires `sscsb verify --format json`, which shipped in sscsb
+**v0.3.0**. The default `sscsb-version: latest` resolves to the newest
+release; every release from v0.3.0 on carries per-target Sigstore bundles, so
+the verified install path applies. The action probes the installed binary and
+fails with a clear message if it is too old (v0.2.1 or earlier).
 
 ## Vendored scoring code
 

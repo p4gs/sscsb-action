@@ -28,7 +28,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 - Quickstart now grants `id-token: write` and documents the canonical
   workflow path the directory pins to (`.github/workflows/sscsb-scan.yml`).
-- The self-test workflow signs and verifies its own record end-to-end.
+- The self-test workflow installs `latest` (v0.3.0+) instead of building
+  from source — so CI exercises the Sigstore-verified install path — and
+  signs and verifies its own record end-to-end.
 
 ## [0.1.0] - 2026-09-01
 

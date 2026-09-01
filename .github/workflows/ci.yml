@@ -38,9 +38,10 @@ jobs:
         uses: ./
         with:
           submit: "false"
-          # sscsb v0.3.0 (first release with `sscsb verify --format json`) is
-          # published, so the self-test exercises the same "latest" download
-          # path consumers get by default.
+          # `latest` (v0.3.0+, which ships `verify --format json`) exercises the
+          # real install path: release tarball, .sha256 sidecar, AND the
+          # Sigstore bundle verified against sscs-bootstrapper's release
+          # workflow identity. `build` would bypass all of that.
           sscsb-version: "latest"
       - name: Assert the record exists and parses
         shell: bash
