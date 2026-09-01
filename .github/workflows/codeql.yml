@@ -1,10 +1,8 @@
 # sscsb: CodeQL — deep interprocedural analysis on PRs and the default branch.
 #
-# The matrix below analyses `actions` only, because that is the one language
-# EVERY repo bootstrapped by sscsb has (these workflows), and it is the only
-# choice that is guaranteed to run without knowing anything about your project.
-# ADD YOUR OWN LANGUAGE(S) — sscsb does not detect them for you, and CodeQL that
-# does not read your source code is not analysing your source code.
+# The matrix analyses `actions` (these workflows — the language every sscsb-
+# bootstrapped repo has) plus `javascript-typescript` for the vendored
+# TypeScript under scripts/ that this composite action executes.
 name: CodeQL
 on:
   push:
@@ -25,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: ["actions"] # e.g. rust, javascript-typescript, python, go
+        language: ["actions", "javascript-typescript"] # actions = these workflows; javascript-typescript = the vendored TS under scripts/
     steps:
       - name: Harden runner
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
