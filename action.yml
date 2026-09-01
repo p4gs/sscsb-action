@@ -1,0 +1,288 @@
+# SSCS Bootstrapper Scan — composite action.
+#
+# Runs `sscsb` (p4gs/sscs-bootstrapper) against the repository that invokes it
+# and builds a scan record in the exact shape the public directory at
+# tools.sensiblesecurity.xyz/sscsb/ consumes. Because this runs inside the
+# repository's OWN CI with its own token, GitHub-side checks are performed
+# authenticated — the "auth'd scan results" lane, versus the directory's
+# unauthenticated external scans.
+#
+# Correctness conventions (repo-family standard):
+#   - every external action is SHA-pinned with a `# vX.Y.Z` comment
+#   - every `run:` step declares `shell: bash`
+#   - action-local files are addressed via `${{ github.action_path }}`
+#   - attacker-influenced values reach `run:` only through `env:`, never by
+#     `${{ }}` interpolation into the script body
+#   - fail-closed everywhere: checksum mismatch, unsupported binary, and
+#     operational errors (sscsb exit 2) all fail the step; only sscsb exit 1
+#     ("a gate failed") is treated as scan data.
+
+name: "SSCS Bootstrapper Scan"
+description: >-
+  Run sscsb (the SSCS Bootstrapper supply-chain-security CLI) inside this
+  repository's own CI and produce an authenticated scan record for the public
+  directory at tools.sensiblesecurity.xyz/sscsb/.
+author: "Justin Pagano"
+branding:
+  icon: shield
+  color: green
+
+inputs:
+  sscsb-version:
+    description: >-
+      Release tag of p4gs/sscs-bootstrapper to install (e.g. "v0.3.0").
+      "latest" resolves the newest published release. "build" compiles sscsb
+      with cargo from a shallow clone of main instead of downloading a release
+      asset. When a requested release has no asset for this runner's platform,
+      the action falls back to the cargo build.
+    required: false
+    default: "latest"
+  submit:
+    description: >-
+      When "true", file or refresh a scan-submission issue on the directory
+      repository so the maintainer publish gate can pick up this run's record.
+      Cross-repo issue creation is beyond the default github.token — see the
+      README for the token this lane actually requires.
+    required: false
+    default: "false"
+  directory-repo:
+    description: The directory repository that receives scan-submission issues.
+    required: false
+    default: "p4gs/p4gs.github.io"
+  github-token:
+    description: >-
+      Token used for GitHub API reads during the scan (repository metadata,
+      release download, and sscsb's authenticated remote checks) and, when
+      submit is "true", for filing the submission issue on the directory
+      repository. The default github.token covers everything except the
+      cross-repo submission.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  grade:
+    description: "Directory letter grade for this scan: A+, A, B, C, D, F, or NA."
+    value: ${{ steps.record.outputs.grade }}
+  overall-percent:
+    description: >-
+      Overall score percentage (0-100, one decimal), or empty when the scan
+      produced no countable evidence.
+    value: ${{ steps.record.outputs.overall-percent }}
+  record-path:
+    description: Absolute path to the generated scan-record.json.
+    value: ${{ steps.record.outputs.record-path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Bun
+      uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+    - name: Install sscsb
+      shell: bash
+      env:
+        SSCSB_VERSION_INPUT: ${{ inputs.sscsb-version }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        SRC_REPO="p4gs/sscs-bootstrapper"
+        BIN_DIR="${RUNNER_TEMP}/sscsb-bin"
+        DL_DIR="${RUNNER_TEMP}/sscsb-download"
+        mkdir -p "$BIN_DIR" "$DL_DIR"
+
+        sha256_of() {
+          # GitHub's Linux images ship sha256sum, macOS images ship both; a
+          # bare macOS host may only have shasum. Either way, one digest.
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$1" | awk '{print $1}'
+          else
+            shasum -a 256 "$1" | awk '{print $1}'
+          fi
+        }
+
+        build_from_main() {
+          echo "::notice::building sscsb from a shallow clone of ${SRC_REPO}@main (cargo build --release --locked)"
+          git clone --quiet --depth 1 "https://github.com/${SRC_REPO}" "${RUNNER_TEMP}/sscsb-src"
+          (cd "${RUNNER_TEMP}/sscsb-src" && cargo build --release --locked)
+          install -m 0755 "${RUNNER_TEMP}/sscsb-src/target/release/sscsb" "${BIN_DIR}/sscsb"
+        }
+
+        # Map the runner platform to a published release target triple.
+        case "$(uname -s)/$(uname -m)" in
+          Linux/x86_64)  TARGET="x86_64-unknown-linux-gnu" ;;
+          Darwin/arm64)  TARGET="aarch64-apple-darwin" ;;
+          Darwin/x86_64) TARGET="x86_64-apple-darwin" ;;
+          *)             TARGET="" ;;
+        esac
+
+        if [ "$SSCSB_VERSION_INPUT" = "build" ]; then
+          build_from_main
+        else
+          TAG="$SSCSB_VERSION_INPUT"
+          if [ "$TAG" = "latest" ]; then
+            TAG="$(gh api "repos/${SRC_REPO}/releases/latest" --jq .tag_name)"
+            echo "latest release resolves to ${TAG}"
+          fi
+          ASSET="sscsb-${TAG}-${TARGET}.tar.gz"
+          if [ -n "$TARGET" ] \
+            && gh release download "$TAG" --repo "$SRC_REPO" --dir "$DL_DIR" \
+                 --pattern "$ASSET" --pattern "${ASSET}.sha256"; then
+            # Fail-closed: a missing sidecar or a digest mismatch is a tamper
+            # signal, never a reason to fall back to a different install path.
+            [ -s "${DL_DIR}/${ASSET}.sha256" ] || { echo "::error::checksum sidecar ${ASSET}.sha256 missing or empty"; exit 1; }
+            expected="$(awk '{print $1}' "${DL_DIR}/${ASSET}.sha256")"
+            actual="$(sha256_of "${DL_DIR}/${ASSET}")"
+            if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+              echo "::error::sha256 mismatch for ${ASSET}: expected ${expected:-<none>}, got ${actual}"
+              exit 1
+            fi
+            tar -xzf "${DL_DIR}/${ASSET}" -C "$BIN_DIR" sscsb
+            chmod 0755 "${BIN_DIR}/sscsb"
+          else
+            echo "::warning::no release asset ${ASSET} for this platform — falling back to a cargo build of main"
+            build_from_main
+          fi
+        fi
+
+        # The scan protocol needs `verify --format json` (landed after v0.2.1).
+        if ! "${BIN_DIR}/sscsb" verify --help 2>/dev/null | grep -q -- '--format'; then
+          echo "::error::this sscsb build does not support 'verify --format json' — pin sscsb-version to a release newer than v0.2.1, or use sscsb-version: build"
+          exit 1
+        fi
+
+        echo "$BIN_DIR" >> "$GITHUB_PATH"
+        "${BIN_DIR}/sscsb" --version
+
+    - name: Run the sscsb scan protocol
+      shell: bash
+      env:
+        # sscsb's authenticated GitHub-side checks (branch protection / rulesets,
+        # Scorecard) run through gh with this token — the auth'd-scan lane.
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        SCAN_DIR="${RUNNER_TEMP}/sscsb-scan"
+        mkdir -p "$SCAN_DIR"
+        cd "${GITHUB_WORKSPACE}"
+        git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+          || { echo "::error::the workspace is not a git repository — run actions/checkout before this action"; exit 1; }
+
+        # Honesty diff: snapshot what the repository contained BEFORE init.
+        # Anything sscsb init creates after this line can never be counted as
+        # the repository's own evidence (the directory's reclassification rule).
+        git ls-files -z > "${SCAN_DIR}/pre-files.z"
+
+        sscsb init
+
+        # Exit 1 means "a gate failed" — that is scan DATA, not a failure of
+        # this action. Only >1 (operational error) fails the step.
+        rc=0; sscsb verify --format json > "${SCAN_DIR}/verify.json" || rc=$?
+        if [ "$rc" -gt 1 ]; then
+          echo "::error::sscsb verify errored (exit ${rc}) — operational failure, not a security verdict"
+          exit "$rc"
+        fi
+        echo "sscsb verify exited ${rc} (1 = at least one gate failed; recorded as data)"
+
+        rc=0; sscsb report --format json > "${SCAN_DIR}/report.json" || rc=$?
+        if [ "$rc" -gt 1 ]; then
+          echo "::error::sscsb report errored (exit ${rc})"
+          exit "$rc"
+        fi
+
+        # Registry defaults from a FRESH init of the SAME binary in an empty
+        # temp repo — the default-on control scope can never drift from the
+        # scanner version and can never be shrunk by the target's own config.
+        DEFAULTS_DIR="${RUNNER_TEMP}/sscsb-defaults"
+        mkdir -p "$DEFAULTS_DIR"
+        (
+          cd "$DEFAULTS_DIR"
+          export GIT_CONFIG_COUNT=0 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+          git init --quiet -b main
+          sscsb init > /dev/null
+          sscsb report --format json > "${SCAN_DIR}/defaults.json"
+        )
+
+    - name: Build the scan record
+      id: record
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        SCAN_DIR="${RUNNER_TEMP}/sscsb-scan"
+
+        DEFAULT_BRANCH="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .default_branch)"
+        [ -n "$DEFAULT_BRANCH" ] || { echo "::error::could not resolve the default branch via the GitHub API"; exit 1; }
+        # Description is optional in the record; never fail the scan over it.
+        DESCRIPTION="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.description // ""' 2>/dev/null || true)"
+
+        export PRE_FILES_PATH="${SCAN_DIR}/pre-files.z"
+        export VERIFY_JSON_PATH="${SCAN_DIR}/verify.json"
+        export REPORT_JSON_PATH="${SCAN_DIR}/report.json"
+        export DEFAULTS_JSON_PATH="${SCAN_DIR}/defaults.json"
+        export SLUG="${GITHUB_REPOSITORY}"
+        export DEFAULT_BRANCH DESCRIPTION
+        export COMMIT_SHA="${GITHUB_SHA}"
+        SSCSB_VERSION="$(sscsb --version | awk '{print $NF}')"
+        export SSCSB_VERSION
+        export RUN_ID="${GITHUB_RUN_ID}"
+        export RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+        export OUT_PATH="${GITHUB_WORKSPACE}/scan-record.json"
+
+        bun "${ACTION_PATH}/scripts/scan/build-record.ts"
+
+        GRADE="$(bun -e 'const r = await Bun.file(process.env.OUT_PATH!).json(); console.log(String(r.score.grade));')"
+        PERCENT="$(bun -e 'const r = await Bun.file(process.env.OUT_PATH!).json(); console.log(String(r.score.overall_percent ?? ""));')"
+        {
+          echo "grade=${GRADE}"
+          echo "overall-percent=${PERCENT}"
+          echo "record-path=${OUT_PATH}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Upload the scan record artifact
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: sscsb-scan-record
+        path: ${{ steps.record.outputs.record-path }}
+        if-no-files-found: error
+
+    - name: Submit to the directory
+      if: ${{ inputs.submit == 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        DIRECTORY_REPO: ${{ inputs.directory-repo }}
+      run: |
+        set -euo pipefail
+        export TITLE="[action-scan] ${GITHUB_REPOSITORY}"
+        RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+        BODY_FILE="${RUNNER_TEMP}/sscsb-submit-body.md"
+        {
+          echo "Authenticated sscsb scan record produced by \`p4gs/sscsb-action\` in the scanned repository's own CI."
+          echo
+          echo "- Repository: \`${GITHUB_REPOSITORY}\`"
+          echo "- Head SHA: \`${GITHUB_SHA}\`"
+          echo "- Workflow run ID: \`${GITHUB_RUN_ID}\`"
+          echo "- Workflow run: ${RUN_URL}"
+          echo "- Artifact: \`sscsb-scan-record\` (contains \`scan-record.json\`)"
+          echo
+          echo "The directory pipeline fetches the artifact from the public run above and routes it through the same maintainer publish gate as every other scan. The record JSON itself is never carried in this issue body."
+        } > "$BODY_FILE"
+
+        # Search first, match on the exact title client-side (GitHub search
+        # treats brackets loosely, so never trust the search match alone).
+        EXISTING="$(gh issue list --repo "$DIRECTORY_REPO" --label action-scan-result \
+          --state open --limit 1000 --json number,title \
+          --jq '[.[] | select(.title == env.TITLE)][0].number // empty')"
+
+        if [ -n "$EXISTING" ]; then
+          gh issue edit "$EXISTING" --repo "$DIRECTORY_REPO" --body-file "$BODY_FILE" \
+            || { echo "::error::could not refresh submission issue #${EXISTING} on ${DIRECTORY_REPO} — the token needs issues:write on that repository"; exit 1; }
+          echo "::notice::refreshed submission issue #${EXISTING} on ${DIRECTORY_REPO}"
+        else
+          gh issue create --repo "$DIRECTORY_REPO" --title "$TITLE" \
+            --label action-scan-result --body-file "$BODY_FILE" \
+            || { echo "::error::could not create the submission issue on ${DIRECTORY_REPO} — the token needs issues:write on that repository and the label 'action-scan-result' must exist there"; exit 1; }
+          echo "::notice::created submission issue on ${DIRECTORY_REPO}"
+        fi
