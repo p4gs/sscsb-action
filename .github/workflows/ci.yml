@@ -14,6 +14,9 @@ jobs:
   self-test:
     name: self-test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write # exercise record signing end-to-end (no secret; GitHub's OIDC token)
     strategy:
       fail-fast: false
       matrix:
@@ -57,3 +60,27 @@ jobs:
           '
           test -n "$GRADE" || { echo "::error::grade output is empty"; exit 1; }
           echo "grade output: ${GRADE}"
+      - name: Assert the record is signed and the signature verifies
+        # Same-repo runs hold id-token: write, so `sign: auto` must have
+        # produced a bundle; verify it exactly the way the directory does,
+        # pinned to THIS repository's CI workflow. Fork PRs get no OIDC token
+        # and legitimately produce an unsigned record — detected inside the
+        # script (the runner-injected variable is not in the `env` context).
+        shell: bash
+        env:
+          RECORD_PATH: ${{ steps.scan.outputs.record-path }}
+          SIGNED: ${{ steps.scan.outputs.signed }}
+          BUNDLE_PATH: ${{ steps.scan.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "::notice::no OIDC token in this run (fork PR) — signing legitimately skipped; nothing to verify"
+            [ "$SIGNED" = "false" ] || { echo "::error::signed=${SIGNED} without an OIDC token?"; exit 1; }
+            exit 0
+          fi
+          [ "$SIGNED" = "true" ] || { echo "::error::record not signed although the job holds id-token: write"; exit 1; }
+          test -s "$BUNDLE_PATH" || { echo "::error::bundle missing at ${BUNDLE_PATH}"; exit 1; }
+          cosign verify-blob "$RECORD_PATH" --bundle "$BUNDLE_PATH" \
+            --certificate-identity-regexp "^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/ci\.yml@" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+          echo "signature verified against ${GITHUB_REPOSITORY}/.github/workflows/ci.yml"
