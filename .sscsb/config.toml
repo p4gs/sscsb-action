@@ -1,0 +1,267 @@
+# SSCS Bootstrapper configuration — the single source of truth for which
+# controls are enabled. Every control is independently toggleable here;
+# no code changes required. Secure defaults are ON; optional integrations
+# that need external services or extra tooling are OFF.
+#
+# Toggle:   sscsb enable <control> | sscsb disable <control>
+# Inspect:  sscsb status | sscsb verify | sscsb report
+#
+# Repo shape this config is curated for: a composite GitHub Action with
+# vendored TypeScript (zero dependency manifests) whose releases are
+# SOURCE-ONLY git tags (v0.1.0 + the moving v1 major tag) — no built
+# artifacts are ever published. Every artifact-lane control is disabled
+# below with that rationale; everything that applies to source, commits,
+# workflows, and posture is ON.
+
+[general]
+# Branches where human-only signing and merge policy are enforced.
+protected_branches = ["main", "master"]
+# fail_open = true would let hooks pass when scanners are missing. Keep false.
+fail_open = false
+github_repo = "p4gs/sscsb-action"
+
+# ── Phase 1 — Local source integrity ──
+
+# Secret scanning hooks: TruffleHog + Gitleaks block secrets at pre-commit and pre-push
+[controls.secrets]
+enabled = true
+trufflehog = true
+gitleaks = true
+pre_push_range_scan = true
+
+# CommitSigningGuard: human-only signing enforced on protected branches at pre-push.
+# require_hardware_backed relaxed (owner decision, applies across repos) to admit
+# the owner's 1Password-vaulted SSH key (software-backed, not a physical security
+# key) — 1Password is the standing SSH-signing-key store going forward.
+[controls.commit-signing]
+enabled = true
+require_hardware_backed = false
+require_review_evidence_for_ai_merges = true
+
+# AI agent commit signing: DISABLED — no AI agent holds a signing identity for
+# this repo; the sanctioned signer is the owner's 1Password-vaulted key (see
+# commit-signing) and AI provenance is carried by ai-trailers + ai-receipts.
+[controls.agent-signing]
+enabled = false
+require_agent_signatures = false
+allowed_backends = ["github-app", "tpm", "fido2", "kms", "piv", "software"]
+max_key_age_days = 90
+
+# Five-environment signing model: Machine-wide signing posture: human enclave lane, distinct agent identity, cloud/web/Codespaces guidance
+[controls.signing-model]
+enabled = true
+
+# Branch protection verification: Verify GitHub protected-branch rules (PRs, no force-push, signatures, checks)
+[controls.branch-protection]
+enabled = true
+
+# Actions pinning & permissions audit: Flag mutable action refs and missing/over-broad workflow permissions
+[controls.actions-audit]
+enabled = true
+
+# gittuf ref protection: DISABLED — advanced/off-by-default; solo-maintainer repo
+# where GitHub branch protection + required signatures already gate ref changes,
+# and no second maintainer exists to hold gittuf root-of-trust keys.
+[controls.gittuf]
+enabled = false
+
+# AI commit trailers: Validate AI-Assisted / AI-Tool / AI-Model / AI-Role commit trailers
+[controls.ai-trailers]
+enabled = true
+
+# AI dependency & command gate: Extra gating when AI-assisted commits add dependencies or shell commands
+[controls.ai-dep-gate]
+enabled = true
+
+# AI-provenance PR template: PR template asking whether AI generated code/tests/dependencies/docs
+[controls.pr-template]
+enabled = true
+
+# AI provenance receipts: ENABLED (off by default) — this repo is developed
+# AI-assisted, so commits carry cryptographic receipts linking them to
+# tool/model/role, Cosign-signed.
+[controls.ai-receipts]
+enabled = true
+sign_with_cosign = true
+cosign_identity = ""
+cosign_issuer = "https://token.actions.githubusercontent.com"
+
+# ── Phase 2 — Dependency & vulnerability visibility ──
+
+# SBOM generation: Syft SBOM in CycloneDX (default) or SPDX JSON
+[controls.sbom]
+enabled = true
+format = "cyclonedx-json"
+
+# Vulnerability scanning: Trivy (vuln+secret+misconfig) and OSV-Scanner V2 (lockfile-exact)
+[controls.vuln-scan]
+enabled = true
+fail_on = "high"
+
+# OpenSSF Scorecard: Scorecard workflow scoring repository security posture
+[controls.scorecard]
+enabled = true
+
+# Renovate onboarding: Automated dependency updates with digest pinning + lockfile maintenance
+[controls.renovate]
+enabled = true
+
+# Package trust gate: Existence validation, human approval for new packages, typosquat heuristics, lockfile-exact installs
+[controls.package-trust]
+enabled = true
+registry_check = true
+typosquat_check = true
+
+# Bumblebee endpoint exposure scan: ENABLED (off by default) — inventory of
+# installed packages/MCP servers/extensions matched against known-compromise
+# catalogs; cheap posture signal for an AI-developed repo.
+[controls.bumblebee]
+enabled = true
+profile = "baseline"
+catalog = ""
+
+# Grype: ENABLED (off by default) — SBOM-first vulnerability scanning over the
+# Syft SBOM, complementing Trivy/OSV with a second matcher.
+[controls.grype]
+enabled = true
+
+# Socket Firewall: DISABLED — the vendored TypeScript has ZERO dependency
+# manifests (deps baseline found 0 packages); there are no package installs
+# for an install-time firewall to mediate.
+[controls.socket-firewall]
+enabled = false
+
+# ── Phase 3 — Provenance, signing & credential federation ──
+# Releases here are source-only git tags — no artifacts are built or published,
+# so the entire artifact signing/attestation/verification lane is disabled.
+
+# Sigstore keyless signing: DISABLED — no built release artifacts to Cosign-sign;
+# releases are git tags over source (consumers pin the action by SHA/tag).
+[controls.sigstore-signing]
+enabled = false
+
+# SLSA Build L3 provenance: DISABLED — slsa-github-generator attests built
+# artifacts; this repo publishes none.
+[controls.slsa-provenance]
+enabled = false
+
+# GitHub artifact attestations: DISABLED — attest-build-provenance requires an
+# artifact digest to bind; source-only tag releases have no artifact.
+[controls.github-attestations]
+enabled = false
+
+# GitHub SBOM attestation: DISABLED — same artifact-digest requirement as
+# github-attestations; the SBOM itself is still generated (controls.sbom).
+[controls.sbom-attestation]
+enabled = false
+
+# OpenSSF Model Signing: DISABLED — no ML model artifacts in this repo.
+[controls.model-signing]
+enabled = false
+
+# Provenance verification gates: DISABLED — there is no promote/deploy/publish
+# lane consuming built artifacts; nothing exists for slsa-verifier/cosign to
+# verify (see phase-3 header).
+[controls.provenance-verify]
+enabled = false
+builder_id = ""
+
+# Immutable releases (draft-then-publish): DISABLED — releases are plain git
+# tags with no attached assets, and the Action-ecosystem convention of a moving
+# v1 major tag is inherently mutable. Documented honestly: consumers who want
+# immutability should pin the action by full commit SHA (as this repo's own
+# workflows pin theirs); the v1 tag trades immutability for ecosystem-standard
+# upgrade ergonomics.
+[controls.release-immutability]
+enabled = false
+
+# Octo STS federation: DISABLED — no automation here needs repo-scoped
+# credentials; every workflow runs on the default GITHUB_TOKEN with
+# least-privilege permissions and no long-lived PAT exists to replace.
+[controls.octo-sts]
+enabled = false
+
+# Harden-Runner: StepSecurity Harden-Runner egress/tamper monitoring in every workflow
+[controls.harden-runner]
+enabled = true
+
+# Witness: DISABLED — in-toto attestation capture around build steps; there is
+# no build producing artifacts to attest.
+[controls.witness]
+enabled = false
+
+# ── Phase 4 — Deeper code security & CI hardening ──
+
+# SAST (OpenGrep default): OpenGrep rule-driven SAST in pre-commit and CI; Semgrep selectable
+[controls.sast]
+enabled = true
+engine = "opengrep"
+pre_commit = false
+rules = ".sscsb/rules"
+
+# Sighthound: DISABLED — optional extra local SAST layer; OpenGrep (pre-commit
+# + CI) and CodeQL already cover SAST for the vendored TypeScript.
+[controls.sighthound]
+enabled = false
+
+# CodeQL: Deep interprocedural analysis on PRs and default branch (covers the vendored TypeScript under scripts/)
+[controls.codeql]
+enabled = true
+
+# ClusterFuzzLite fuzzing: DISABLED — opt-in control that needs project fuzz
+# targets; a composite Action shelling out to sscsb has no in-repo parsing
+# surface that warrants a fuzz harness.
+[controls.fuzzing]
+enabled = false
+
+# Extended workflow audit: pull_request_target misuse, credential persistence, secret echo, risky actions
+[controls.workflow-audit-extended]
+enabled = true
+
+# StepSecurity secure-repo: Onboarding accelerator via app.stepsecurity.io (web service, not an action)
+[controls.secure-repo]
+enabled = true
+
+# wait-for-secrets: DISABLED — no high-sensitivity workflow here injects
+# secrets; CI is read-only on the default GITHUB_TOKEN.
+[controls.wait-for-secrets]
+enabled = false
+
+# ── Phase 5 — Observability & governance ──
+
+# Dependency-Track: DISABLED — requires a self-hosted platform instance; none
+# is operated for this repo (and there are zero dependency manifests to feed it).
+[controls.dependency-track]
+enabled = false
+url = ""
+project_name = ""
+
+# GUAC ingestion: DISABLED — supply-chain knowledge graph service; no GUAC
+# instance is operated for this repo.
+[controls.guac]
+enabled = false
+
+# OpenVEX: Generate and ingest VEX for exploitability-aware triage
+[controls.openvex]
+enabled = true
+
+# ORAS OCI storage: DISABLED — no OCI registry lane; SBOMs/attestations live in
+# the repo and the GitHub attestation store is not used (source-only releases).
+[controls.oras]
+enabled = false
+
+# OpenSSF Security Insights: Machine-readable security-insights.yml declaring the project's security practices and reporting channels
+[controls.security-insights]
+enabled = true
+
+# OpenSSF Best Practices Badge helper: Worksheet pre-filling the passing-badge criteria from installed controls (lifts Scorecard's CII check)
+[controls.best-practices-badge]
+enabled = true
+
+# OSPS Baseline assessment: Maps enabled controls to OpenSSF Project Security Baseline families and adds an OSPS column to `sscsb report`
+[controls.osps-baseline]
+enabled = true
+
+# Compliance map & report: Machine-readable control → SLSA/SSDF/CRA/OSPS/Badge map behind `sscsb report`
+[controls.compliance-map]
+enabled = true

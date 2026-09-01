@@ -35,10 +35,10 @@ jobs:
         uses: ./
         with:
           submit: "false"
-          # The scan protocol needs `sscsb verify --format json`, which landed
-          # after sscsb v0.2.1. Flip this to "latest" (or delete it) once a
-          # newer sscsb release is published.
-          sscsb-version: "build"
+          # sscsb v0.3.0 (first release with `sscsb verify --format json`) is
+          # published, so the self-test exercises the same "latest" download
+          # path consumers get by default.
+          sscsb-version: "latest"
       - name: Assert the record exists and parses
         shell: bash
         env:

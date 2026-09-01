@@ -1,3 +1,6 @@
 node_modules/
 scan-record.json
 *.log
+
+# sscsb: generated output (SBOMs, receipts, VEX), not policy
+.sscsb/out/
