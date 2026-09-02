@@ -10,7 +10,7 @@ issuer: https://token.actions.githubusercontent.com
 # workflows running on its default branch (the workflow_dispatch consumer in
 # .github/workflows/octo-sts-example.yml runs there):
 # repo:OWNER/REPO:ref:refs/heads/main
-subject_pattern: 'repo:p4gs/sscsb-action:ref:refs/heads/main'
+subject_pattern: 'repo:p4gs(@10093271)?/sscsb-action(@1354037399)?:ref:refs/heads/main' # IDs pinned: GitHub's OIDC sub is repo:OWNER@ID/REPO@ID:ref:…
 
 permissions:
   # Least privilege: grant only what the automation needs.
