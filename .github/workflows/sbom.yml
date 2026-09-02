@@ -1,10 +1,13 @@
-# sscsb: SBOM generation (Syft via anchore/sbom-action, CycloneDX JSON).
+# sscsb: SBOM generation (Syft via anchore/sbom-action, CycloneDX JSON) for
+# the default branch. The RELEASE SBOM is produced inside release.yml, bound to
+# the tarball digest via an SBOM attestation, and uploaded to the DRAFT
+# release before publish — so this workflow no longer runs on `release:
+# published` (an asset upload after publish is exactly what release
+# immutability forbids) and needs no write permission.
 name: SBOM
 on:
   push:
     branches: ["main"]
-  release:
-    types: [published]
 
 permissions:
   contents: read
@@ -13,7 +16,7 @@ jobs:
   sbom:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # attach SBOM to releases
+      contents: read
     steps:
       - name: Harden runner
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
@@ -29,7 +32,7 @@ jobs:
           format: cyclonedx-json
           output-file: sbom.cdx.json
           artifact-name: sbom.cdx.json
-          upload-release-assets: true
+          upload-release-assets: false
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
