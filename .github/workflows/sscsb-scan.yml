@@ -37,7 +37,7 @@ jobs:
           persist-credentials: false
       - name: SSCS Bootstrapper Scan
         id: scan
-        uses: p4gs/sscsb-action@v1
+        uses: p4gs/sscsb-action@4f0634d514d5a70dca35201fac5f0dfd94da81a9 # v1
         with:
           sscsb-version: latest
           submit: "false"
