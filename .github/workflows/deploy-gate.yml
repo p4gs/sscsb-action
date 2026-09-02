@@ -1,0 +1,243 @@
+# sscsb: verification gate before publish — the repository's single
+# provenance-verify implementation. release.yml calls this as a reusable
+# workflow between its build/provenance and publish jobs (`needs:` enforces
+# the order), so a release set reaches the DRAFT release only after:
+#
+#   1. checksum gate     — every *.sha256 sidecar matches its file;
+#   2. signature gate    — every Cosign bundle verifies against the identity of
+#                          THIS repository's release workflow at THIS tag
+#                          (Fulcio cert, GitHub OIDC issuer, Rekor inclusion);
+#   3. SLSA L3 gate      — slsa-verifier verifies the generator's *.intoto.jsonl
+#                          for every tarball: subject digest, source URI, source
+#                          tag, and the pinned trusted builder id;
+#   4. provenance gate   — GitHub's attestation store holds a SLSA v1 build
+#                          provenance for the tarball digest, signed by the same
+#                          workflow at the same tag, on a GitHub-hosted runner;
+#   5. SBOM gate         — the store also holds a CycloneDX SBOM attestation
+#                          bound to that same digest.
+#
+# Each gate fails EXPLICITLY when there is nothing to verify. An unmatched glob
+# silently becoming a literal string is not a verification result, and "we
+# found no artifacts, so nothing failed" must never be a way to reach publish.
+#
+# Two provenances, two verifiers, on purpose: the slsa-github-generator's
+# *.intoto.jsonl (SLSA Build L3, isolated builder) is read by slsa-verifier;
+# the attestation-store provenance (SLSA Build L2, GitHub-hosted builder) and
+# the SBOM attestation are read by `gh attestation verify`. Both bind to the
+# same tarball digest; a release that satisfies one but not the other is not
+# published. The builder id slsa-verifier pins arrives as an input from the
+# caller so it sits beside the generator ref it must track; the same id is
+# recorded under [controls.provenance-verify] builder_id in .sscsb/config.toml
+# for `sscsb provenance verify`.
+#
+# Egress policy: `audit` for now — see the header of release.yml for the
+# planned switch to `block` + allowed-endpoints after one audited release run.
+name: Deploy Gate — Verify before Publish
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        description: "Name of the workflow artifact holding the release set (tarball, .sha256, SBOM, *.sigstore.json)"
+        required: true
+        type: string
+      provenance-artifact-name:
+        description: "Name of the workflow artifact holding the slsa-github-generator *.intoto.jsonl for the set"
+        required: true
+        type: string
+      tag:
+        description: "Release tag the set was built from (vX.Y.Z); bundles, provenance and attestations must bind to it"
+        required: true
+        type: string
+      builder-id:
+        description: "Trusted SLSA builder id the *.intoto.jsonl must carry (the generator ref the caller pinned, as https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@refs/tags/vX.Y.Z)"
+        required: true
+        type: string
+      signer-workflow:
+        description: "Repo-relative path of the workflow whose identity signed and attested the set"
+        required: false
+        type: string
+        default: .github/workflows/release.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # download the run's artifacts + read the attestation store
+    # Inputs reach the shell through the ENVIRONMENT, never interpolated into a
+    # `run:` — `gh release download "${{ inputs.tag }}"` would splice a caller-
+    # influenced string straight into bash, the script-injection shape
+    # `sscsb verify workflow-audit-extended` flags.
+    env:
+      TAG: ${{ inputs.tag }}
+      SIGNER_WORKFLOW: ${{ inputs.signer-workflow }}
+      BUILDER_ID: ${{ inputs.builder-id }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - name: Download the release set
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: assets
+      # Separate directory: the provenance is signed by the generator (DSSE,
+      # Fulcio), not by a Cosign bundle of ours, so the signature gate's
+      # "every file in assets/ has a bundle" rule must not be asked of it.
+      - name: Download the SLSA provenance
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.provenance-artifact-name }}
+          path: provenance
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Install slsa-verifier
+        uses: slsa-framework/slsa-verifier/actions/installer@ea584f4502babc6f60d9bc799dbbb13c1caa9ee6 # v2.7.1
+      - name: Verify checksums (integrity gate)
+        run: |
+          set -uo pipefail
+          cd assets
+          shopt -s nullglob
+          sums=(*.sha256)
+          if [ ${#sums[@]} -eq 0 ]; then
+            echo "::error::no *.sha256 sidecars found — refusing to certify an unchecksummed set"
+            exit 1
+          fi
+          sha256sum -c "${sums[@]}"
+      # Identity regexp is ANCHORED (^ … $); the host dots, the repo/workflow
+      # path dots, AND the tag's dots are escaped, so it cannot match a
+      # look-alike host, a repo whose name merely starts with ours, another
+      # workflow in this repo, the same workflow signing a different tag, or a
+      # tag that differs only where an unescaped `.` would have matched any
+      # character (v1.2.3 vs v1x2y3).
+      - name: Verify Cosign bundles (signature gate)
+        run: |
+          set -uo pipefail
+          cd assets
+          shopt -s nullglob
+          bundles=(*.sigstore.json)
+          if [ ${#bundles[@]} -eq 0 ]; then
+            echo "::error::no *.sigstore.json bundles found — refusing to certify unsigned artifacts"
+            exit 1
+          fi
+          workflow_re="$(printf '%s' "${SIGNER_WORKFLOW}" | sed 's/[.]/\\./g')"
+          repo_re="$(printf '%s' "${GITHUB_REPOSITORY}" | sed 's/[.]/\\./g')"
+          tag_re="$(printf '%s' "${TAG}" | sed 's/[.]/\\./g')"
+          identity="^https://github\.com/${repo_re}/${workflow_re}@refs/tags/${tag_re}$"
+          fail=0
+          for bundle in "${bundles[@]}"; do
+            artifact="${bundle%.sigstore.json}"
+            if [ ! -f "$artifact" ]; then
+              echo "::error::${bundle} has no matching artifact — an orphan bundle certifies nothing"
+              fail=1
+              continue
+            fi
+            cosign verify-blob "$artifact" \
+              --bundle "$bundle" \
+              --certificate-identity-regexp "$identity" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              || { echo "::error::signature verification failed for ${artifact}"; fail=1; }
+          done
+          # Every non-bundle file must have been covered — an unsigned file in
+          # the set is as disqualifying as a bad signature.
+          for f in *; do
+            case "$f" in *.sigstore.json) continue ;; esac
+            [ -f "$f.sigstore.json" ] || { echo "::error::${f} is unsigned"; fail=1; }
+          done
+          exit $fail
+      # --builder-id is OPTIONAL to slsa-verifier, and omitting it makes this
+      # gate accept provenance from ANY builder slsa-verifier trusts for this
+      # repository — not the one that actually builds these releases. It is
+      # therefore a REQUIRED input here. --source-tag binds the provenance to
+      # this tag's ref; the subject digest must match the tarball's bytes.
+      - name: Verify SLSA L3 provenance with slsa-verifier (SLSA gate)
+        run: |
+          set -uo pipefail
+          shopt -s nullglob
+          provenance=(provenance/*.intoto.jsonl)
+          artifacts=(assets/*.tar.gz)
+          if [ ${#provenance[@]} -ne 1 ]; then
+            echo "::error::expected exactly one *.intoto.jsonl, found ${#provenance[@]}: ${provenance[*]:-none} — refusing to certify unprovenanced artifacts"
+            exit 1
+          fi
+          if [ ${#artifacts[@]} -eq 0 ]; then
+            echo "::error::no *.tar.gz artifacts found — nothing was verified"
+            exit 1
+          fi
+          [ -n "${BUILDER_ID}" ] || { echo "::error::builder-id input is empty — refusing to trust any builder"; exit 1; }
+          fail=0
+          for f in "${artifacts[@]}"; do
+            slsa-verifier verify-artifact "$f" \
+              --provenance-path "${provenance[0]}" \
+              --source-uri "github.com/${GITHUB_REPOSITORY}" \
+              --source-tag "${TAG}" \
+              --builder-id "${BUILDER_ID}" \
+              || { echo "::error::SLSA provenance verification failed for ${f}"; fail=1; }
+          done
+          exit $fail
+      # Both store lookups pin: this repository, the signer workflow, the tag's
+      # ref, GitHub-hosted runners only, and the exact predicate type. A short
+      # retry absorbs store propagation right after the build job wrote them —
+      # it never relaxes a check.
+      - name: Verify build provenance in the attestation store (provenance gate)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          cd assets
+          shopt -s nullglob
+          artifacts=(*.tar.gz)
+          if [ ${#artifacts[@]} -eq 0 ]; then
+            echo "::error::no *.tar.gz artifacts found — nothing was verified"
+            exit 1
+          fi
+          fail=0
+          for f in "${artifacts[@]}"; do
+            ok=0
+            for attempt in 1 2 3; do
+              if gh attestation verify "$f" \
+                   --repo "$GITHUB_REPOSITORY" \
+                   --signer-workflow "${GITHUB_REPOSITORY}/${SIGNER_WORKFLOW}" \
+                   --source-ref "refs/tags/${TAG}" \
+                   --predicate-type https://slsa.dev/provenance/v1 \
+                   --deny-self-hosted-runners; then
+                ok=1; break
+              fi
+              echo "attempt ${attempt}: provenance for ${f} not verifiable yet"; sleep 10
+            done
+            [ "$ok" -eq 1 ] || { echo "::error::no verifiable build provenance for ${f}"; fail=1; }
+          done
+          exit $fail
+      - name: Verify SBOM attestation in the attestation store (SBOM gate)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          cd assets
+          shopt -s nullglob
+          artifacts=(*.tar.gz)
+          if [ ${#artifacts[@]} -eq 0 ]; then
+            echo "::error::no *.tar.gz artifacts found — nothing was verified"
+            exit 1
+          fi
+          [ -s sbom.cdx.json ] || { echo "::error::sbom.cdx.json missing from the set"; exit 1; }
+          fail=0
+          for f in "${artifacts[@]}"; do
+            ok=0
+            for attempt in 1 2 3; do
+              if gh attestation verify "$f" \
+                   --repo "$GITHUB_REPOSITORY" \
+                   --signer-workflow "${GITHUB_REPOSITORY}/${SIGNER_WORKFLOW}" \
+                   --source-ref "refs/tags/${TAG}" \
+                   --predicate-type https://cyclonedx.org/bom \
+                   --deny-self-hosted-runners; then
+                ok=1; break
+              fi
+              echo "attempt ${attempt}: SBOM attestation for ${f} not verifiable yet"; sleep 10
+            done
+            [ "$ok" -eq 1 ] || { echo "::error::no verifiable SBOM attestation for ${f}"; fail=1; }
+          done
+          exit $fail

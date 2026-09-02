@@ -7,11 +7,14 @@
 # Inspect:  sscsb status | sscsb verify | sscsb report
 #
 # Repo shape this config is curated for: a composite GitHub Action with
-# vendored TypeScript (zero dependency manifests) whose releases are
-# SOURCE-ONLY git tags (v0.1.0 + the moving v1 major tag) — no built
-# artifacts are ever published. Every artifact-lane control is disabled
-# below with that rationale; everything that applies to source, commits,
-# workflows, and posture is ON.
+# vendored TypeScript (zero dependency manifests). Releases are semver tags
+# (vX.Y.Z, plus the hand-moved v1 major tag) whose shipped artifact is the
+# action source at the tag: .github/workflows/release.yml packages it with
+# `git archive`, attests build provenance + a CycloneDX SBOM to GitHub's
+# attestation store, Cosign-signs every file, verifies all of it through the
+# reusable deploy gate, and publishes an immutable release. The artifact-lane
+# controls below are ON where that pipeline genuinely implements them and OFF
+# (with the reason) where it deliberately does not.
 
 [general]
 # Branches where human-only signing and merge policy are enforced.
@@ -132,54 +135,93 @@ enabled = true
 enabled = false
 
 # ── Phase 3 — Provenance, signing & credential federation ──
-# Releases here are source-only git tags — no artifacts are built or published,
-# so the entire artifact signing/attestation/verification lane is disabled.
+# The release artifact is `sscsb-action-<tag>.tar.gz` (git archive of the tag)
+# plus its .sha256 sidecar, sbom.cdx.json, and the slsa-github-generator
+# *.intoto.jsonl, all produced by the `build` and `provenance` jobs of
+# .github/workflows/release.yml on every vX.Y.Z tag push. Signing, SLSA L3
+# provenance, attestation, and SBOM attestation are CONSOLIDATED in that one
+# workflow — they run over the exact bytes that get published, before publish
+# — rather than in the modular release-sign / release-slsa / release-attest /
+# release-attest-sbom workflows sscsb would otherwise install (those upload
+# after `release: published`, which an immutable release forbids).
 
-# Sigstore keyless signing: DISABLED — no built release artifacts to Cosign-sign;
-# releases are git tags over source (consumers pin the action by SHA/tag).
+# Sigstore keyless signing: ENABLED — release.yml `build` job (id-token: write):
+# sigstore/cosign-installer (SHA-pinned) + `cosign sign-blob … --bundle` over
+# every file in dist/ (tarball, .sha256, SBOM); bundles ship as release assets
+# and the deploy gate verifies each against
+# https://github.com/p4gs/sscsb-action/.github/workflows/release.yml@refs/tags/<tag>.
 [controls.sigstore-signing]
-enabled = false
+enabled = true
 
-# SLSA Build L3 provenance: DISABLED — slsa-github-generator attests built
-# artifacts; this repo publishes none.
+# SLSA Build L3 provenance: ENABLED — release.yml `provenance` job calls
+# slsa-framework/slsa-github-generator generator_generic_slsa3.yml@v2.1.0
+# (tag-pinned by the generator's trust model — the one audited pinning
+# exception) over the tarball's sha256 line from `build` (base64-subjects),
+# under actions: read + id-token: write + contents: write. The earlier claim
+# that this generator is incompatible with immutable releases was WRONG: with
+# `upload-assets: false` the *.intoto.jsonl is a workflow ARTIFACT, never a
+# release write; the deploy gate verifies it with slsa-verifier, and the
+# publish job uploads it to the DRAFT release alongside the tarball, checksum,
+# SBOM and Cosign bundles before the single publish. L3 (generator) and the
+# attestation-store L2 provenance (github-attestations) both bind the same
+# digest and are both verified before publish.
 [controls.slsa-provenance]
-enabled = false
+enabled = true
 
-# GitHub artifact attestations: DISABLED — attest-build-provenance requires an
-# artifact digest to bind; source-only tag releases have no artifact.
+# GitHub artifact attestations: ENABLED — release.yml `build` job
+# (attestations: write): actions/attest-build-provenance (SHA-pinned) with
+# subject-path dist/*.tar.gz, verified before publish by the deploy gate via
+# `gh attestation verify --signer-workflow … --source-ref refs/tags/<tag>`.
 [controls.github-attestations]
-enabled = false
+enabled = true
 
-# GitHub SBOM attestation: DISABLED — same artifact-digest requirement as
-# github-attestations; the SBOM itself is still generated (controls.sbom).
+# GitHub SBOM attestation: ENABLED — release.yml `build` job: anchore/sbom-action
+# (CycloneDX JSON) + actions/attest (SHA-pinned) with sbom-path bound to the
+# tarball digest; verified before publish by the deploy gate
+# (`--predicate-type https://cyclonedx.org/bom`).
 [controls.sbom-attestation]
-enabled = false
+enabled = true
 
 # OpenSSF Model Signing: DISABLED — no ML model artifacts in this repo.
 [controls.model-signing]
 enabled = false
 
-# Provenance verification gates: DISABLED — there is no promote/deploy/publish
-# lane consuming built artifacts; nothing exists for slsa-verifier/cosign to
-# verify (see phase-3 header).
+# Provenance verification gates: ENABLED — .github/workflows/deploy-gate.yml is
+# a `workflow_call` reusable workflow that release.yml's `gate` job runs between
+# build/provenance and publish (`needs:` makes publish unreachable without it):
+# checksum gate, Cosign bundle gate (anchored identity regexp, host/path/tag
+# dots escaped), slsa-verifier gate over the generator's *.intoto.jsonl
+# (--source-uri, --source-tag, --builder-id), build-provenance gate and
+# SBOM-attestation gate against the attestation store. builder_id below is the
+# trusted SLSA builder `sscsb provenance verify` and the gate pin — the
+# generator ref release.yml calls, in slsa-verifier's @refs/tags form; it MUST
+# track that `uses:` ref (change one, change the other). The attestation-store
+# gates pin a different identity (this repo's release.yml via
+# --signer-workflow), passed to the gate as `signer-workflow`.
 [controls.provenance-verify]
-enabled = false
-builder_id = ""
+enabled = true
+builder_id = "https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@refs/tags/v2.1.0"
 
-# Immutable releases (draft-then-publish): DISABLED — releases are plain git
-# tags with no attached assets, and the Action-ecosystem convention of a moving
-# v1 major tag is inherently mutable. Documented honestly: consumers who want
-# immutability should pin the action by full commit SHA (as this repo's own
-# workflows pin theirs); the v1 tag trades immutability for ecosystem-standard
-# upgrade ergonomics.
+# Immutable releases (draft-then-publish): ENABLED — release.yml uploads the
+# tarball, checksum, SBOM and Cosign bundles to a DRAFT release and publishes
+# ONCE, after the deploy gate passes; nothing is written after the release
+# becomes immutable (sbom.yml no longer uploads on `release: published` for the
+# same reason). Requires "release immutability" enabled in the repository's
+# Settings -> General -> Releases. The moving `v1` major tag (Action-ecosystem
+# upgrade ergonomics) is moved by hand, carries no release, and is outside
+# this model — consumers who want immutability pin by full commit SHA, as this
+# repo's own workflows do.
 [controls.release-immutability]
-enabled = false
+enabled = true
 
-# Octo STS federation: DISABLED — no automation here needs repo-scoped
-# credentials; every workflow runs on the default GITHUB_TOKEN with
-# least-privilege permissions and no long-lived PAT exists to replace.
+# Octo STS federation: ENABLED — .github/chainguard/sscsb-automation.sts.yaml
+# admits this repo's own `main` workflows for `contents: read`;
+# .github/workflows/octo-sts-example.yml (workflow_dispatch) federates through
+# octo-sts/action (SHA-pinned) and uses the ~1h token for a read-only release-
+# immutability probe. No PAT or App secret exists in this repo. Requires the
+# Octo STS GitHub App installed on p4gs/sscsb-action.
 [controls.octo-sts]
-enabled = false
+enabled = true
 
 # Harden-Runner: StepSecurity Harden-Runner egress/tamper monitoring in every workflow
 [controls.harden-runner]
