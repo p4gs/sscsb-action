@@ -4,6 +4,34 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Sigstore-verified install.** The `sscsb` release tarball is now verified
+  against its `.sigstore.json` bundle — pinned to the tool repository's own
+  `release.yml@refs/tags/<version>` signing identity via GitHub's OIDC
+  issuer — in addition to the `.sha256` sidecar. Integrity *and* origin; a
+  missing or non-verifying bundle fails the run rather than falling back.
+- **Signed scan records** (`sign` input, default `auto`): with `id-token:
+  write` on the job, `scan-record.json` is keyless-signed with cosign under
+  the workflow's OIDC identity and the bundle ships in the
+  `sscsb-scan-record` artifact. The directory verifies it pinned to
+  `OWNER/REPO/.github/workflows/sscsb-scan.yml` on the live default branch —
+  the OpenSSF-Scorecard trust model. `auto` warns and uploads unsigned when
+  the permission is absent; `true` fails instead; `false` never signs.
+- New outputs `signed` and `bundle-path`; the submission issue states whether
+  the record is signed.
+- `cosign` is installed unconditionally (pinned `sigstore/cosign-installer`).
+
+### Changed
+
+- Quickstart now grants `id-token: write` and documents the canonical
+  workflow path the directory pins to (`.github/workflows/sscsb-scan.yml`).
+- The self-test workflow installs `latest` (v0.3.0+) instead of building
+  from source — so CI exercises the Sigstore-verified install path — and
+  signs and verifies its own record end-to-end.
+
 ## [0.1.0] - 2026-09-01
 
 ### Added

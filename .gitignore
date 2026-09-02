@@ -4,3 +4,4 @@ scan-record.json
 
 # sscsb: generated output (SBOMs, receipts, VEX), not policy
 .sscsb/out/
+*.sigstore.json
