@@ -19,9 +19,8 @@
 
 name: "SSCS Bootstrapper Scan"
 description: >-
-  Run sscsb (the SSCS Bootstrapper supply-chain-security CLI) inside this
-  repository's own CI and produce an authenticated scan record for the public
-  directory at tools.sensiblesecurity.xyz/sscsb/.
+  Run sscsb supply-chain-security scans in your own CI and publish
+  authenticated records to the SSCSB public directory.
 author: "Justin Pagano"
 branding:
   icon: shield
