@@ -40,9 +40,17 @@ export const CONTROL_CLASSES: Readonly<Record<string, EvidenceClass>> = {
   "ai-dep-gate": "C",
   "pr-template": "A",
   "ai-receipts": "C",
+  // A committed binary is in the tree: the tree is the evidence.
+  "binary-artifacts": "A",
+  // Hook settings are a live remote read any lane with `read:repo_hook`
+  // can make; the default github.token cannot, and degrades to unverified.
+  webhooks: "B",
   // Phase 2
   sbom: "A",
   "vuln-scan": "A",
+  // Dockerfile digests, lockfiles and download verification are committed
+  // files: the tree is the evidence.
+  "dependency-pinning": "A",
   scorecard: "B",
   renovate: "A",
   "package-trust": "C",
@@ -88,6 +96,13 @@ export interface VerifyRow {
   messages: string[];
   artifacts: string[];
   tools: string[];
+  /**
+   * Why a `degraded` row degraded, when the control says (sscsb ≥ 0.4):
+   * `tool-missing` | `scan-error` | `no-inventory` | `no-remote` |
+   * `unconfigured`. Additive within schema v1 — absent on every other outcome
+   * and on controls that have not adopted it, never `null`.
+   */
+  degraded_reason?: string;
 }
 
 export interface ReclassifyInput {
@@ -177,12 +192,23 @@ export function reclassify(input: ReclassifyInput): ControlRecord[] {
       } else {
         scan = mapDirect(row.outcome);
         if (row.outcome === "degraded" && row.artifacts.length > 0) {
-          // Artifact-carrying tool controls degrade on missing runner tools;
-          // with all artifacts pre-existing, the committed evidence stands.
-          scan = "pass";
-          reclassified = true;
-          reason =
-            "runner-tool availability is the scanner's environment, not the repository's; all registered artifacts pre-exist";
+          // Artifact-carrying tool controls degrade when the runner lacks the
+          // tool; with all artifacts pre-existing, the committed evidence
+          // stands. That lift is ONLY for an absent tool. A scanner that ran
+          // and did not complete (`scan-error`), or ran and found nothing to
+          // examine (`no-inventory`), verified nothing — lifting that to
+          // `pass` would let a scan that failed outrank a maintainer's real
+          // `fail`. Rows from binaries older than the field carry no reason
+          // and keep the lift, since "tool absent" was their only degrade.
+          const reason_code = row.degraded_reason;
+          if (reason_code === undefined || reason_code === "tool-missing") {
+            scan = "pass";
+            reclassified = true;
+            reason =
+              "runner-tool availability is the scanner's environment, not the repository's; all registered artifacts pre-exist";
+          } else {
+            reason = `the scanner ran and could not verify (${reason_code}); committed artifacts alone are not a verdict`;
+          }
         }
       }
     }

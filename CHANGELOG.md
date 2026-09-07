@@ -8,6 +8,30 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **OSV-Scanner is installed on the runner** (pinned v2.4.0, sha256-checked,
+  Linux x86_64), so `verify vuln-scan` under sscsb ≥ 0.4 is a verdict rather
+  than a presence check: every installed scanner runs and a finding at or
+  above `fail_on` is a `fail` in the record. A download that does not match
+  its digest, or a binary that does not answer `--version`, fails the step
+  outright — a lane that promised the scanner never publishes a record
+  without it. Other platforms get a warning and the honest
+  `degraded_reason = tool-missing`. Trivy and Syft are deliberately not
+  installed: Trivy pulls a vulnerability database per runner, and both stay
+  local-lane depth.
+- **Three controls classified** ahead of the sscsb release that emits them:
+  `binary-artifacts` (class A, phase 1), `webhooks` (class B, phase 1) and
+  `dependency-pinning` (class A, phase 2). Classification is fail-closed, so
+  this has to land before the scanner does.
+
+### Changed
+
+- **A `degraded` row with pre-existing artifacts is rescored `pass` only when
+  the scanner was absent.** sscsb ≥ 0.4 rows carry `degraded_reason`; the
+  lift now applies only to `tool-missing` (or to rows from binaries older
+  than the field, whose only degrade was an absent tool). `scan-error` and
+  `no-inventory` stay `unverified` with the reason quoted — a scanner that
+  ran and could not verify must never outrank a maintainer's real `fail`.
+
 - **Sigstore-verified install.** The `sscsb` release tarball is now verified
   against its `.sigstore.json` bundle — pinned to the tool repository's own
   `release.yml@refs/tags/<version>` signing identity via GitHub's OIDC

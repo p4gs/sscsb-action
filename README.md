@@ -209,10 +209,12 @@ environment are recorded as `unverified` rather than passed. Full rules on the
 [methodology page](https://tools.sensiblesecurity.xyz/sscsb/methodology/).
 
 Tip: `sscsb` orchestrates external scanners (TruffleHog, Gitleaks, Syft,
-Trivy, OSV-Scanner, …). Tools missing on the runner degrade the affected
-checks, which lowers *evidence coverage*, not your pass rate — installing them
-in a step before this action raises how much of your posture the record can
-actually attest.
+Trivy, OSV-Scanner, …). The action installs OSV-Scanner itself (pinned and
+digest-checked, Linux x86_64), so `verify vuln-scan` runs a real scan and a
+finding at or above your `fail_on` is a `fail` in the record. Other tools
+missing on the runner degrade the affected checks, which lowers *evidence
+coverage*, not your pass rate — installing them in a step before this action
+raises how much of your posture the record can actually attest.
 
 ## Version compatibility
 

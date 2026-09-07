@@ -103,6 +103,40 @@ runs:
     - name: Install cosign
       uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
+    # OSV-Scanner is what makes `verify vuln-scan` a verdict rather than a
+    # presence check (sscsb ≥ 0.4 runs every installed scanner and gates on
+    # findings). One static binary, online mode against api.osv.dev, no
+    # database pull — the same mechanism OpenSSF Scorecard's Vulnerabilities
+    # check uses. Pinned by version and sha256; a download that does not match
+    # or a binary that does not answer `--version` fails the step outright, so
+    # a lane that promised the scanner never publishes a record without it.
+    # Trivy and Syft are deliberately NOT installed here: Trivy pulls a
+    # vulnerability database per runner, and both stay local-lane depth.
+    - name: Install osv-scanner
+      shell: bash
+      env:
+        OSV_VERSION: "2.4.0"
+        OSV_SHA256_LINUX_AMD64: "15314940c10d26af9c6649f150b8a47c1262e8fc7e17b1d1029b0e479e8ed8a0"
+      run: |
+        set -euo pipefail
+        case "$(uname -s)-$(uname -m)" in
+          Linux-x86_64) asset="osv-scanner_linux_amd64"; expected="$OSV_SHA256_LINUX_AMD64" ;;
+          *)
+            echo "::warning::osv-scanner is pinned for Linux x86_64 runners only; on $(uname -s)-$(uname -m) verify vuln-scan reports degraded_reason=tool-missing"
+            exit 0 ;;
+        esac
+        dl="$(mktemp -d)"
+        curl -fsSL -o "${dl}/osv-scanner" \
+          "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/${asset}"
+        actual="$(sha256sum "${dl}/osv-scanner" | awk '{print $1}')"
+        if [ "$actual" != "$expected" ]; then
+          echo "::error::sha256 mismatch for ${asset} v${OSV_VERSION}: expected ${expected}, got ${actual}"
+          exit 1
+        fi
+        chmod 0755 "${dl}/osv-scanner"
+        mv "${dl}/osv-scanner" /usr/local/bin/osv-scanner
+        osv-scanner --version || { echo "::error::osv-scanner installed but does not run"; exit 1; }
+
     - name: Install sscsb
       shell: bash
       env:
