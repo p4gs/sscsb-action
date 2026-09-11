@@ -6,10 +6,10 @@
     "name": "sscsb-action",
     "url": "https://github.com/p4gs/sscsb-action",
     "default_branch": "main",
-    "commit": "3b6f93722b7bae2aec54793339607b516f36ce87",
+    "commit": "f37f780cb0f236685090d7d92fe6ab00f381805a",
     "description": ""
   },
-  "scanned_at": "2026-09-11T15:15:47Z",
+  "scanned_at": "2026-09-11T15:29:08Z",
   "scanner": {
     "sscsb_version": "0.4.0",
     "workflow_run_id": 0,
@@ -193,7 +193,7 @@
       "reclassified": false,
       "reason": null,
       "messages": [
-        "39 tracked file(s), none a compiled program or a code-carrying archive"
+        "41 tracked file(s), none a compiled program or a code-carrying archive"
       ]
     },
     {
@@ -262,7 +262,7 @@
         "  FuzzingID [sscsb-fixable] → fuzzing — score is 0: project is not fuzzed: (add cargo-fuzz targets + a ClusterFuzzLite workflow (the probe Scorecard detects for Rust) — shipping as the `fuzzing` control increment)",
         "  CIIBestPracticesID [owner-action] → no control — score is 0: no effort to earn an OpenSSF best practices badge detected (register the project at bestpractices.dev and add the badge — an owner action sscsb cannot perform)",
         "  MaintainedID [unmapped] — score is 0: project was created within the last 90 days. Please review its contents carefully:",
-        "  CodeReviewID [solo-capped] → branch-protection — score is 0: Found 0/9 approved changesets -- score normalized to 0 (Scorecard counts approved changesets; a solo maintainer merging their own PRs cannot self-approve — needs a 2nd reviewer)",
+        "  CodeReviewID [solo-capped] → branch-protection — score is 0: Found 0/10 approved changesets -- score normalized to 0 (Scorecard counts approved changesets; a solo maintainer merging their own PRs cannot self-approve — needs a 2nd reviewer)",
         "  BranchProtectionID [sscsb-fixable] → branch-protection — score is 4: branch protection is not maximal on development and all release branches: (run `sscsb harden branch-protection --apply` for the solo-safe knobs; the approver/code-owner/last-push tier needs a 2nd maintainer (`--require-reviews`))",
         "reported as INFO, not PASS: open Scorecard findings exist; each is routed to the sscsb control that gates it above"
       ]
@@ -720,15 +720,15 @@
     "record_version": 1,
     "lane": "local",
     "namespace": "sscsb-scan-record",
-    "generated_at": "2026-09-11T15:15:47Z",
+    "generated_at": "2026-09-11T15:29:08Z",
     "sscsb_version": "0.4.0",
     "repo": {
       "owner": "p4gs",
       "name": "sscsb-action",
       "url": "https://github.com/p4gs/sscsb-action",
       "default_branch": "main",
-      "branch": "chore/local-scan-record",
-      "commit": "3b6f93722b7bae2aec54793339607b516f36ce87"
+      "branch": "chore/rescan-on-main",
+      "commit": "f37f780cb0f236685090d7d92fe6ab00f381805a"
     },
     "worktree": {
       "clean": true,
