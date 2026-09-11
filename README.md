@@ -210,8 +210,11 @@ environment are recorded as `unverified` rather than passed. Full rules on the
 
 Tip: `sscsb` orchestrates external scanners (TruffleHog, Gitleaks, Syft,
 Trivy, OSV-Scanner, …). The action installs OSV-Scanner itself (pinned and
-digest-checked, Linux x86_64), so `verify vuln-scan` runs a real scan and a
-finding at or above your `fail_on` is a `fail` in the record. Other tools
+digest-checked, Linux x86_64), so under `sscsb` 0.4 and newer `verify
+vuln-scan` runs a real scan and a finding at or above your `fail_on`
+(`[controls.vuln-scan] fail_on` in `.sscsb/config.toml`, default `high`) is a
+`fail` in the record. Against 0.3.x the row is still a presence check, so
+pin `sscsb-version` to 0.4 or later to get the gate. Other tools
 missing on the runner degrade the affected checks, which lowers *evidence
 coverage*, not your pass rate — installing them in a step before this action
 raises how much of your posture the record can actually attest.

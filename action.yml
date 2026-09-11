@@ -134,7 +134,18 @@ runs:
           exit 1
         fi
         chmod 0755 "${dl}/osv-scanner"
-        mv "${dl}/osv-scanner" /usr/local/bin/osv-scanner
+        # Install into RUNNER_TEMP and extend PATH, the same way "Install sscsb"
+        # below does. Writing to /usr/local/bin needs a privilege this action has
+        # never required: it happens to be writable on GitHub-hosted ubuntu
+        # images, but a container job running as a non-root user, or a
+        # locked-down self-hosted runner, would fail the move — and because this
+        # step is fail-closed and unconditional on Linux, that would take the
+        # whole action down for those consumers.
+        OSV_BIN_DIR="${RUNNER_TEMP}/osv-bin"
+        mkdir -p "$OSV_BIN_DIR"
+        mv "${dl}/osv-scanner" "${OSV_BIN_DIR}/osv-scanner"
+        printf '%s\n' "$OSV_BIN_DIR" >> "$GITHUB_PATH"
+        export PATH="${OSV_BIN_DIR}:${PATH}"
         osv-scanner --version || { echo "::error::osv-scanner installed but does not run"; exit 1; }
 
     - name: Install sscsb
