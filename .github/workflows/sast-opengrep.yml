@@ -44,12 +44,26 @@ jobs:
             --certificate-identity-regexp "^https://github\.com/opengrep/opengrep/" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com
           chmod +x opengrep && sudo mv opengrep /usr/local/bin/
+      # Two rulesets, because each covers what the other does not:
+      #   .sscsb/rules — 4 curated, always-applicable supply-chain patterns
+      #                  (remote script piped into a shell, insecure git
+      #                  remotes, npm install without --ignore-scripts,
+      #                  hardcoded home paths).
+      #   auto         — the community registry. On this repo that is the only
+      #                  source of TypeScript coverage: measured 2026-09-12,
+      #                  `--config .sscsb/rules` alone runs 4 rules and models
+      #                  ZERO TypeScript vuln classes, while the two together
+      #                  run 255 rules (163 of them TS) over the vendored
+      #                  scripts/. CodeQL is kept as well and is NOT redundant
+      #                  with this — it does interprocedural analysis OpenGrep's
+      #                  pattern matching cannot reach, so the two engines catch
+      #                  different classes.
       # --exclude .sscsb/rules: a scanner must not scan its own rule definitions.
       # A rule file necessarily contains the pattern text it matches on, so any
       # finding there is false by construction.
       - name: Run OpenGrep
         run: |
-          opengrep scan --config .sscsb/rules --exclude .sscsb/rules \
+          opengrep scan --config .sscsb/rules --config auto --exclude .sscsb/rules \
             --sarif-output=opengrep.sarif --error .
       - name: Upload SARIF
         if: always()
