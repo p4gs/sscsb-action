@@ -26,15 +26,15 @@ github_repo = "p4gs/sscsb-action"
 # ── Phase 1 — Local source integrity ──
 
 # Secret scanning hooks: TruffleHog blocks secrets at pre-commit and pre-push;
-# Gitleaks runs alongside it (owner decision, 2026-10-05, superseding the
+# Gitleaks runs alongside it (owner decision, 2026-10-06, superseding the
 # 2026-09-12 TruffleHog-only change recorded in this file's history).
-# TruffleHog actively VERIFIES a candidate credential against its provider
-# (`--results=verified,unknown`), so a finding separates a live secret from a
-# dead string — but that verification step is also why it drops anything it
-# cannot confirm live, including generic secrets (e.g. `api_key = "<random>"`)
-# and unverifiable keys. Gitleaks' regex/entropy matching catches exactly that
-# class, which TruffleHog's verified-only filter structurally cannot. Two
-# scanners, two different failure modes covered — not redundant.
+# TruffleHog only finds credentials for providers it has a detector for, and
+# with `--results=verified,unknown` it reports a match only when the provider
+# confirms it live or the verification attempt errors; it drops matches it
+# could not verify, including those from detectors with no verifier. Gitleaks
+# matches on shape, so it also catches generic secrets such as passwords,
+# internal tokens and keys for services TruffleHog has no detector for (e.g.
+# `api_key = "<random>"`). Two scanners, two different failure modes covered.
 [controls.secrets]
 enabled = true
 trufflehog = true

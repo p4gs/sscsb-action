@@ -33,18 +33,16 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- **Secret scanning runs TruffleHog and Gitleaks together.** TruffleHog
-  actively VERIFIES a candidate credential against its provider
-  (`--results=verified,unknown`), so a finding distinguishes a live secret from
-  a dead string — but that same verification step drops anything it can't
-  confirm live, including generic secrets (e.g. `api_key = "<random>"`) and
-  unverifiable keys. Gitleaks' regex/entropy matching catches that class
-  directly, so the two tools cover different failure modes rather than
-  duplicating one. Restored: the `gitleaks` job in
-  `.github/workflows/secrets-scan.yml` and the `.gitleaks.toml` ruleset
-  (whose only allowlist entry covers `.sscsb/out/*`, which is gitignored and
-  therefore never scanned anyway — no blind spot created either way); and
-  `gitleaks = true` in `.sscsb/config.toml`, rationale recorded inline.
+- **Secret scanning keeps TruffleHog and Gitleaks together (decision
+  recorded, no behaviour change).** TruffleHog only finds credentials for
+  providers it has a detector for, and with `--results=verified,unknown` it
+  reports a match only when the provider confirms it live or the verification
+  attempt errors; it drops matches it could not verify, including those from
+  detectors with no verifier. Gitleaks matches on shape, so it also catches
+  generic secrets such as passwords, internal tokens and keys for services
+  TruffleHog has no detector for. The `gitleaks` job, `.gitleaks.toml` and
+  `gitleaks = true` are unchanged; the rationale is now recorded inline in
+  `.sscsb/config.toml`.
 
 - **OpenGrep's CI gate gained the community registry, which is its only
   TypeScript coverage.** `.github/workflows/sast-opengrep.yml` now runs
