@@ -25,18 +25,20 @@ github_repo = "p4gs/sscsb-action"
 
 # ── Phase 1 — Local source integrity ──
 
-# Secret scanning hooks: TruffleHog blocks secrets at pre-commit and pre-push.
-# gitleaks = false (owner policy, 2026-09-12): where two tools cover one control,
-# this repo runs the single strongest one. TruffleHog actively VERIFIES a candidate
-# credential against its provider (`--results=verified,unknown`), so it separates a
-# live secret from a dead string; gitleaks is regex/entropy-only and cannot. Running
-# both added a second regex engine, a second CI job and a licensing surface
-# (gitleaks-action needs GITLEAKS_LICENSE for orgs) without adding a detection class
-# TruffleHog lacks. One scanner, verified results, no redundant blind spot to audit.
+# Secret scanning hooks: TruffleHog blocks secrets at pre-commit and pre-push;
+# Gitleaks runs alongside it (owner decision, 2026-10-05, superseding the
+# 2026-09-12 TruffleHog-only change recorded in this file's history).
+# TruffleHog actively VERIFIES a candidate credential against its provider
+# (`--results=verified,unknown`), so a finding separates a live secret from a
+# dead string — but that verification step is also why it drops anything it
+# cannot confirm live, including generic secrets (e.g. `api_key = "<random>"`)
+# and unverifiable keys. Gitleaks' regex/entropy matching catches exactly that
+# class, which TruffleHog's verified-only filter structurally cannot. Two
+# scanners, two different failure modes covered — not redundant.
 [controls.secrets]
 enabled = true
 trufflehog = true
-gitleaks = false
+gitleaks = true
 pre_push_range_scan = true
 
 # CommitSigningGuard: human-only signing enforced on protected branches at pre-push.
