@@ -33,6 +33,39 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Secret scanning keeps TruffleHog and Gitleaks together (decision
+  recorded, no behaviour change).** TruffleHog only finds credentials for
+  providers it has a detector for, and with `--results=verified,unknown` it
+  reports a match only when the provider confirms it live or the verification
+  attempt errors; it drops matches it could not verify, including those from
+  detectors with no verifier. Gitleaks matches on shape, so it also catches
+  generic secrets such as passwords, internal tokens and keys for services
+  TruffleHog has no detector for. The `gitleaks` job, `.gitleaks.toml` and
+  `gitleaks = true` are unchanged; the rationale is now recorded inline in
+  `.sscsb/config.toml`.
+
+- **OpenGrep's CI gate gained the community registry, which is its only
+  TypeScript coverage.** `.github/workflows/sast-opengrep.yml` now runs
+  `--config .sscsb/rules --config auto`. Measured 2026-09-12: the curated
+  ruleset alone runs **4** generic rules and models **zero** TypeScript vuln
+  classes, while the two together run **255** rules — 163 of them TypeScript —
+  over the vendored `scripts/`. 0 findings at time of change. CodeQL is
+  deliberately kept alongside it rather than treated as redundant: it performs
+  interprocedural analysis OpenGrep's pattern matching cannot reach, so the two
+  engines catch different classes. `controls.sast.rules` intentionally stays
+  scoped to the curated set so the local `sscsb sast` pre-check remains
+  offline-capable; the divergence is documented in `.sscsb/config.toml`.
+
+- **`signing-model`'s cloud-claude lane is converged repo-side**
+  (`.claude/settings.json` attribution block), closing the one sub-item of that
+  control that was actually probeable. The control still reports `degraded`;
+  every remaining sub-item is an owner action behind a web UI with no read API,
+  or is prohibited by the one-signer policy, and each is now documented per-lane
+  in `.sscsb/config.toml` rather than left looking like neglect. None was closed
+  with `--confirm`: that records a dated claim the owner performed an action,
+  and recording one unobserved would be exactly the evidence dishonesty this
+  project exists to prevent.
+
 - **A `degraded` row with pre-existing artifacts is rescored `pass` only when
   the scanner was absent.** sscsb ≥ 0.4 rows carry `degraded_reason`; the
   lift now applies only to `tool-missing` (or to rows from binaries older

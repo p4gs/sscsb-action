@@ -25,7 +25,16 @@ github_repo = "p4gs/sscsb-action"
 
 # ── Phase 1 — Local source integrity ──
 
-# Secret scanning hooks: TruffleHog + Gitleaks block secrets at pre-commit and pre-push
+# Secret scanning hooks: TruffleHog blocks secrets at pre-commit and pre-push;
+# Gitleaks runs alongside it (owner decision, 2026-10-06, superseding the
+# 2026-09-12 TruffleHog-only change recorded in this file's history).
+# TruffleHog only finds credentials for providers it has a detector for, and
+# with `--results=verified,unknown` it reports a match only when the provider
+# confirms it live or the verification attempt errors; it drops matches it
+# could not verify, including those from detectors with no verifier. Gitleaks
+# matches on shape, so it also catches generic secrets such as passwords,
+# internal tokens and keys for services TruffleHog has no detector for (e.g.
+# `api_key = "<random>"`). Two scanners, two different failure modes covered.
 [controls.secrets]
 enabled = true
 trufflehog = true
@@ -51,6 +60,33 @@ allowed_backends = ["github-app", "tpm", "fido2", "kms", "piv", "software"]
 max_key_age_days = 90
 
 # Five-environment signing model: Machine-wide signing posture: human enclave lane, distinct agent identity, cloud/web/Codespaces guidance
+#
+# STANDING DEGRADED — verified 2026-09-12, with a reason per lane. This control
+# has no lane-scoping config key, so the five sub-items below cannot be marked
+# N/A; they are recorded here instead of being left to look like neglect.
+#   human-local    CONFIGURED. 1Password-vaulted ed25519 key, commit.gpgsign on.
+#   cloud-claude   CONFIGURED repo-side (.claude/settings.json attribution).
+#                  `github_app_installed` stays UNATTESTED: authorizing the
+#                  Claude GitHub App is an owner action at claude.ai/code with
+#                  no read API, and the cloud trust tier is itself an open owner
+#                  decision. Attesting it from here would be a fabricated record.
+#   agent-claude-code  DELIBERATELY NOT CONVERGED. Converging it provisions a
+#                  DISTINCT AI agent commit identity, which the owner's standing
+#                  one-signer directive prohibits outright (every commit signs as
+#                  the human via the 1Password key; the separate agent key is
+#                  retired). Same rationale as `[controls.agent-signing]
+#                  enabled = false` above. This lane should stay open here.
+#   github-web     `vigilant_mode` and `phishing_resistant_mfa` are GitHub web
+#                  settings with NO read API. The local token also lacks
+#                  `read:user`, and even with it the API exposes only 2FA
+#                  on/off, never whether the factor is phishing-resistant.
+#                  Unprovable from here; owner attestation via
+#                  `sscsb signing setup github-web --confirm`.
+#   codespaces     `gpg_verification` is a GitHub web setting with no read API.
+#                  Owner attestation; this repo is not developed in Codespaces.
+# None of the above is closed with `--confirm`, because --confirm records a
+# dated claim that the owner performed an action. Recording one unobserved
+# would be exactly the evidence dishonesty this repo exists to prevent.
 [controls.signing-model]
 enabled = true
 
@@ -235,6 +271,13 @@ enabled = false
 # ── Phase 4 — Deeper code security & CI hardening ──
 
 # SAST (OpenGrep default): OpenGrep rule-driven SAST in pre-commit and CI; Semgrep selectable
+# SAST engine 1 of 2. `rules` scopes the LOCAL `sscsb sast` pre-check to the
+# curated ruleset so it stays offline-capable and deterministic. The CI gate in
+# .github/workflows/sast-opengrep.yml deliberately runs MORE: `--config
+# .sscsb/rules --config auto`, adding the community registry (measured
+# 2026-09-12: 4 rules -> 255, and the only TypeScript coverage OpenGrep has on
+# this repo). The gate is CI, so CI is the broader lane; this divergence is
+# intentional and recorded here rather than left to be discovered.
 [controls.sast]
 enabled = true
 engine = "opengrep"
