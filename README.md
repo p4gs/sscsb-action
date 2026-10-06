@@ -208,8 +208,8 @@ evidence, and controls that can only be observed in a local development
 environment are recorded as `unverified` rather than passed. Full rules on the
 [methodology page](https://sscsb.dev/methodology/).
 
-Tip: `sscsb` orchestrates external scanners (TruffleHog, Syft, Trivy,
-OSV-Scanner, …). The action installs OSV-Scanner itself (pinned and
+Tip: `sscsb` orchestrates external scanners (TruffleHog, Gitleaks, Syft,
+Trivy, OSV-Scanner, …). The action installs OSV-Scanner itself (pinned and
 digest-checked, Linux x86_64), so under `sscsb` 0.4 and newer `verify
 vuln-scan` runs a real scan and a finding at or above your `fail_on`
 (`[controls.vuln-scan] fail_on` in `.sscsb/config.toml`, default `high`) is a
