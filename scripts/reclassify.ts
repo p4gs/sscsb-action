@@ -11,9 +11,9 @@
  * Evidence classes (full rationale on /methodology/):
  *   A  — committed-artifact controls: pass only on pre-existing artifacts.
  *   A' — static audits of committed workflows: vacuous with zero pre-existing
- *        workflows; otherwise the raw verdict maps directly (init's own
- *        templates pass sscsb's audit by construction, so init can only
- *        pollute toward PASS, never cause FAIL).
+ *        workflows; otherwise the raw verdict maps directly. The scan protocol
+ *        hides init-created workflows during verification so they cannot
+ *        supply missing publishing evidence.
  *   B  — live-remote checks (GitHub API): raw verdict maps directly.
  *   C  — local-environment checks: unobservable in a repo scan → unverified.
  *   M  — meta/informational: excluded from scoring entirely.
@@ -27,7 +27,7 @@ import type { ControlRecord, RawOutcome, ScanOutcome } from "./schema";
 export type EvidenceClass = "A" | "Aprime" | "B" | "C" | "M";
 
 /** Every control sscsb v1 can emit, mapped to its evidence class. */
-export const CONTROL_CLASSES: Readonly<Record<string, EvidenceClass>> = {
+export const CONTROL_CLASSES: Readonly<Record<string, EvidenceClass>> = Object.freeze(Object.assign(Object.create(null), {
   // Phase 1
   secrets: "A",
   "commit-signing": "C",
@@ -57,6 +57,7 @@ export const CONTROL_CLASSES: Readonly<Record<string, EvidenceClass>> = {
   bumblebee: "C",
   grype: "C",
   "socket-firewall": "C",
+  "socket-firewall-ci": "Aprime",
   // Phase 3
   "sigstore-signing": "A",
   "slsa-provenance": "A",
@@ -85,7 +86,14 @@ export const CONTROL_CLASSES: Readonly<Record<string, EvidenceClass>> = {
   "best-practices-badge": "A",
   "osps-baseline": "A",
   "compliance-map": "M",
-};
+  // Phase 6 — distribution and publishing
+  "publish-targets": "A",
+  "trusted-publishing": "Aprime",
+  "maintainer-mfa": "C",
+  "publish-tokens": "Aprime",
+  "publish-provenance": "B",
+  "dist-manifests": "A",
+}));
 
 /** One row of `sscsb verify --format json` output (schema_version 1). */
 export interface VerifyRow {

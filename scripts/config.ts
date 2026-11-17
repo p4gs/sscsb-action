@@ -17,7 +17,7 @@ export const REPO_URL = "https://github.com/p4gs/sscs-bootstrapper";
 export const SUBMIT_URL = `${REPO_URL}/issues/new?template=scan-request.yml`;
 
 /** Bumped when the scoring rules change; displayed on every repo page. */
-export const METHODOLOGY_VERSION = 1;
+export const METHODOLOGY_VERSION = 2;
 
 /** The scan-record schema this site build understands. */
 export const SCHEMA_VERSION = 1;
