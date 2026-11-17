@@ -11,7 +11,7 @@
 
 import type { ControlRecord, Grade, PhaseScore, Score } from "./schema";
 
-export const PHASES = [1, 2, 3, 4, 5] as const;
+export const PHASES = [1, 2, 3, 4, 5, 6] as const;
 
 /** Grade boundaries (owner-specified academic scale). A+ requires exactly 100. */
 export function gradeFor(overallPercent: number): Exclude<Grade, "NA"> {

@@ -11,8 +11,24 @@ permissions:
   contents: read
 
 jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Test scoring, record compatibility and committed evidence
+        run: bun test scripts
+
   self-test:
-    name: self-test (${{ matrix.os }})
+    name: self-test (${{ matrix.os }}, ${{ matrix.sscsb-version }})
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -21,6 +37,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        sscsb-version: [latest, build]
     steps:
       - name: Harden runner
         # harden-runner supports Linux runners only; skipped on macOS.
@@ -41,8 +58,9 @@ jobs:
           # `latest` (v0.3.0+, which ships `verify --format json`) exercises the
           # real install path: release tarball, .sha256 sidecar, AND the
           # Sigstore bundle verified against sscs-bootstrapper's release
-          # workflow identity. `build` would bypass all of that.
-          sscsb-version: "latest"
+          # workflow identity. The additional `build` lane exercises current
+          # main's control registry and phase count before its next release.
+          sscsb-version: ${{ matrix.sscsb-version }}
       - name: Assert the record exists and parses
         shell: bash
         env:
@@ -51,14 +69,14 @@ jobs:
         run: |
           set -euo pipefail
           test -s "$RECORD_PATH" || { echo "::error::scan-record.json missing or empty at ${RECORD_PATH}"; exit 1; }
-          bun -e '
+          bun - <<'JS'
             const r = await Bun.file(process.env.RECORD_PATH!).json();
             if (r.schema_version !== 1) throw new Error(`schema_version ${r.schema_version} != 1`);
             if (!Array.isArray(r.controls) || r.controls.length === 0) throw new Error("controls empty");
             if (typeof r.score?.grade !== "string") throw new Error("score.grade missing");
             if (!/^[0-9a-f]{40}$/.test(r.repo?.commit ?? "")) throw new Error("repo.commit not a 40-hex sha");
             console.log(`record OK: ${r.repo.owner}/${r.repo.name} grade ${r.score.grade} (${r.score.overall_percent ?? "no evidence"}%)`);
-          '
+          JS
           test -n "$GRADE" || { echo "::error::grade output is empty"; exit 1; }
           echo "grade output: ${GRADE}"
       - name: Assert the record is signed and the signature verifies

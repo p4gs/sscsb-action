@@ -241,6 +241,7 @@ runs:
         # sscsb's authenticated GitHub-side checks (branch protection / rulesets,
         # Scorecard) run through gh with this token — the auth'd-scan lane.
         GH_TOKEN: ${{ inputs.github-token }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
         SCAN_DIR="${RUNNER_TEMP}/sscsb-scan"
@@ -254,11 +255,14 @@ runs:
         # the repository's own evidence (the directory's reclassification rule).
         git ls-files -z > "${SCAN_DIR}/pre-files.z"
 
+        (cd "$ACTION_PATH" && bun scripts/scan/verify-committed.ts --preflight "${SCAN_DIR}/pre-files.z" "$GITHUB_WORKSPACE")
         sscsb init
 
         # Exit 1 means "a gate failed" — that is scan DATA, not a failure of
         # this action. Only >1 (operational error) fails the step.
-        rc=0; sscsb verify --format json > "${SCAN_DIR}/verify.json" || rc=$?
+        rc=0
+        (cd "$ACTION_PATH" && bun scripts/scan/verify-committed.ts "${SCAN_DIR}/pre-files.z" sscsb "$GITHUB_WORKSPACE") \
+          > "${SCAN_DIR}/verify.json" || rc=$?
         if [ "$rc" -gt 1 ]; then
           echo "::error::sscsb verify errored (exit ${rc}) — operational failure, not a security verdict"
           exit "$rc"
@@ -292,6 +296,8 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
+        # Keep target bunfig/preloads/.env outside Bun's runtime configuration.
+        cd "$ACTION_PATH"
         SCAN_DIR="${RUNNER_TEMP}/sscsb-scan"
 
         DEFAULT_BRANCH="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .default_branch)"
